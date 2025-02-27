@@ -23,11 +23,24 @@ def parse_schedule(schedule_raw):
     return schedule
 
 
+def get_video_files(path):
+    """获取指定路径下的所有视频文件"""
+    video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv'}
+    path = Path(path)
+    if path.is_file():
+        return [str(path)] if path.suffix.lower() in video_extensions else []
+    
+    video_files = []
+    for ext in video_extensions:
+        video_files.extend([str(f) for f in path.glob(f'**/*{ext}')])
+    return sorted(video_files)  # 按文件名排序
+
+
 async def main():
     # 主解析器
     parser = argparse.ArgumentParser(description="Upload video to multiple social-media.")
-    parser.add_argument("platform", metavar='platform', choices=get_supported_social_media(), help="Choose social-media platform: douyin tencent tiktok kuaishou")
-
+    parser.add_argument("platform", metavar='platform', choices=get_supported_social_media(), 
+                       help="Choose social-media platform: douyin tencent tiktok kuaishou")
     parser.add_argument("account_name", type=str, help="Account name for the platform: xiaoA")
     subparsers = parser.add_subparsers(dest="action", metavar='action', help="Choose action", required=True)
 
@@ -35,22 +48,38 @@ async def main():
     for action in actions:
         action_parser = subparsers.add_parser(action, help=f'{action} operation')
         if action == 'login':
-            # Login 不需要额外参数
             continue
         elif action == 'upload':
-            action_parser.add_argument("video_file", help="Path to the Video file")
+            source_group = action_parser.add_mutually_exclusive_group(required=True)
+            source_group.add_argument("-f", "--files", nargs='+', help="Path to one or more video files")
+            source_group.add_argument("-d", "--directory", help="Path to directory containing videos")
             action_parser.add_argument("-pt", "--publish_type", type=int, choices=[0, 1],
-                                       help="0 for immediate, 1 for scheduled", default=0)
+                                     help="0 for immediate, 1 for scheduled", default=0)
             action_parser.add_argument('-t', '--schedule', help='Schedule UTC time in %Y-%m-%d %H:%M format')
 
-    # 解析命令行参数
     args = parser.parse_args()
+    
     # 参数校验
     if args.action == 'upload':
-        if not exists(args.video_file):
-            raise FileNotFoundError(f'Could not find the video file at {args["video_file"]}')
+        video_files = []
+        if args.files:
+            video_files = args.files
+        elif args.directory:
+            if not exists(args.directory):
+                raise FileNotFoundError(f'Directory not found: {args.directory}')
+            video_files = get_video_files(args.directory)
+            if not video_files:
+                raise ValueError(f'No video files found in directory: {args.directory}')
+            print(f"找到 {len(video_files)} 个视频文件:")
+            for video in video_files:
+                print(f"- {video}")
+            
+        for video_file in video_files:
+            if not exists(video_file):
+                raise FileNotFoundError(f'Could not find the video file at {video_file}')
+                
         if args.publish_type == 1 and not args.schedule:
-            parser.error("The schedule must must be specified for scheduled publishing.")
+            parser.error("The schedule must be specified for scheduled publishing.")
 
     account_file = Path(BASE_DIR / "cookies" / f"{args.platform}_{args.account_name}.json")
     account_file.parent.mkdir(exist_ok=True)
@@ -67,34 +96,37 @@ async def main():
         elif args.platform == SOCIAL_MEDIA_KUAISHOU:
             await ks_setup(str(account_file), handle=True)
     elif args.action == 'upload':
-        title, tags = get_title_and_hashtags(args.video_file)
-        video_file = args.video_file
+        video_files = args.files if args.files else get_video_files(args.directory)
+        
+        for video_file in video_files:
+            title, tags = get_title_and_hashtags(video_file)
 
-        if args.publish_type == 0:
-            print("Uploading immediately...")
-            publish_date = 0
-        else:
-            print("Scheduling videos...")
-            publish_date = parse_schedule(args.schedule)
+            if args.publish_type == 0:
+                print(f"正在上传: {video_file}")
+                publish_date = 0
+            else:
+                print(f"计划上传: {video_file}")
+                publish_date = parse_schedule(args.schedule)
 
-        if args.platform == SOCIAL_MEDIA_DOUYIN:
-            await douyin_setup(account_file, handle=False)
-            app = DouYinVideo(title, video_file, tags, publish_date, account_file)
-        elif args.platform == SOCIAL_MEDIA_TIKTOK:
-            await tiktok_setup(account_file, handle=True)
-            app = TiktokVideo(title, video_file, tags, publish_date, account_file)
-        elif args.platform == SOCIAL_MEDIA_TENCENT:
-            await weixin_setup(account_file, handle=True)
-            category = TencentZoneTypes.LIFESTYLE.value  # 标记原创需要否则不需要传
-            app = TencentVideo(title, video_file, tags, publish_date, account_file, category)
-        elif args.platform == SOCIAL_MEDIA_KUAISHOU:
-            await ks_setup(account_file, handle=True)
-            app = KSVideo(title, video_file, tags, publish_date, account_file)
-        else:
-            print("Wrong platform, please check your input")
-            exit()
+            if args.platform == SOCIAL_MEDIA_DOUYIN:
+                await douyin_setup(account_file, handle=False)
+                app = DouYinVideo(title, video_file, tags, publish_date, account_file)
+            elif args.platform == SOCIAL_MEDIA_TIKTOK:
+                await tiktok_setup(account_file, handle=True)
+                app = TiktokVideo(title, video_file, tags, publish_date, account_file)
+            elif args.platform == SOCIAL_MEDIA_TENCENT:
+                await weixin_setup(account_file, handle=True)
+                category = TencentZoneTypes.LIFESTYLE.value  # 标记原创需要否则不需要传
+                app = TencentVideo(title, video_file, tags, publish_date, account_file, category)
+            elif args.platform == SOCIAL_MEDIA_KUAISHOU:
+                await ks_setup(account_file, handle=True)
+                app = KSVideo(title, video_file, tags, publish_date, account_file)
+            else:
+                print("Wrong platform, please check your input")
+                exit()
 
-        await app.main()
+            await app.main()
+            print(f"完成上传: {video_file}")
 
 
 if __name__ == "__main__":
