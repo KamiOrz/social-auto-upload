@@ -109,6 +109,12 @@ douyin平台, 账号名为test, 动作为upload, 视频文件（需对应的meta
 
 python cli_main.py douyin test upload "C:\Users\superdog\Videos\2023-11-07_05-27-44 - 这位少女如梦中仙... .mp4" -pt 1 -t "2024-6-14 12:00"
 douyin平台, 账号名为test, 动作为upload, 视频文件, 发布方式（pt）：1 定时发布, 发布时间(t)： 2024-6-14 12:00
+
+发布文件夹内的所有视频
+python cli_main.py douyin account_name upload -d /path/to/video/folder
+
+定时发布文件夹中的视频
+python cli_main.py douyin account_name upload -d /path/to/video/folder -pt 1 -t "2024-03-20 14:30"
 ```
 
 ---
